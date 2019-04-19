@@ -208,6 +208,7 @@ static const pd_create_f cpu_impl_list[] = {
     INSTANCE(ref_eltwise_fwd_t<u8>),
     INSTANCE(ref_eltwise_bwd_t<s32>),
     /* softmax */
+    INSTANCE(jit_softmax_fwd_t<avx512_core>),
     INSTANCE(ref_softmax_fwd_t<f32>),
     INSTANCE(ref_softmax_bwd_t<f32>),
     /* pool */
