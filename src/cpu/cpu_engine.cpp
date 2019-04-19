@@ -47,6 +47,7 @@
 #include "cpu/ref_softmax.hpp"
 #include "cpu/jit_uni_pooling.hpp"
 #include "cpu/jit_uni_i8i8_pooling.hpp"
+#include "cpu/jit_uni_nc_softmax.hpp"
 #include "cpu/ref_pooling.hpp"
 #include "cpu/nchw_pooling.hpp"
 #include "cpu/nhwc_pooling.hpp"
@@ -208,7 +209,7 @@ static const pd_create_f cpu_impl_list[] = {
     INSTANCE(ref_eltwise_fwd_t<u8>),
     INSTANCE(ref_eltwise_bwd_t<s32>),
     /* softmax */
-    INSTANCE(jit_softmax_fwd_t<avx512_core>),
+    INSTANCE(jit_uni_nc_softmax_fwd_t<avx512_core>),
     INSTANCE(ref_softmax_fwd_t<f32>),
     INSTANCE(ref_softmax_bwd_t<f32>),
     /* pool */
