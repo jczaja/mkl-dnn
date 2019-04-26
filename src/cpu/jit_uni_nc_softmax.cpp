@@ -29,11 +29,60 @@ namespace cpu {
 
 using namespace Xbyak;
 
+
+// Kernel to compute softmax for given data 
+template <cpu_isa_t isa>
+struct jit_uni_nc_softmax_fwd_ker_t: public jit_generator {
+    DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_uni_nc_softmax_fwd_ker_t)
+
+    struct call_params_t {
+        const char *src_nc;
+        const char *dst_nc;
+        size_t channel_size;
+        size_t axis;
+    };
+
+    using Vmm = typename cpu_isa_traits<isa>::Vmm;
+    Xmm xreg(int idx) const { return Xmm(idx); }
+    Ymm yreg(int idx) const { return Ymm(xreg(idx).getIdx()); }
+    Vmm vreg(int idx) const { return Vmm(xreg(idx).getIdx()); }
+
+    Reg64 reg_ptr_src_nc = r8;
+    Reg64 reg_ptr_dst_nc = r9;
+
+    jit_softmax_conf_t jsp;
+    void (*ker_)(const call_params_t *);
+
+    void generate();
+    static status_t init_conf(jit_softmax_conf_t &jsp, const softmax_pd_t *spd);
+};
+
+template <cpu_isa_t isa>
+void jit_uni_nc_softmax_fwd_ker_t<isa>::generate() {
+    preamble();
+
+#   define READ_PARAM(reg, field) \
+        mov(reg, ptr[reg_param + offsetof(call_params_t, field)])
+//    READ_PARAM(reg_ptr_src_nc, src_nc);
+//    READ_PARAM(reg_ptr_dst_nc, dst_nc);
+//    READ_PARAM(reg_kw, channel_size);
+//    READ_PARAM(reg_kh, axis);
+
+#   undef READ_PARAM
+
+    // 1. Get Maximum
+    // 2. subtract maximum
+    // 3. exponential values
+    // 4. sum of exponential values
+    // 5. scale exponential value with computed sum
+
+    postamble();
+}
 template <cpu_isa_t isa>
 jit_uni_nc_softmax_fwd_t<isa>::
 jit_uni_nc_softmax_fwd_t(const pd_t *apd)
     : cpu_primitive_t(apd), ker_(nullptr)
-{ /*ker_ = new jit_uni_i8i8_pooling_fwd_ker_t<isa>(pd()->jpp_);*/ }
+{ ker_ = new jit_uni_nc_softmax_fwd_ker_t<isa>(pd()->jsp_); }
 
 template <cpu_isa_t isa>
 void jit_uni_nc_softmax_fwd_t<isa>::execute_forward(
@@ -46,7 +95,9 @@ void jit_uni_nc_softmax_fwd_t<isa>::execute_forward(
 
     (void)src_nc;
     (void)dst_nc;
-    
+
+
+    std::cout << "==> JIT SOFTMAX EXECUTION!" << std::endl;    
 /*
     const auto &jpp = pd()->jpp_;
 
@@ -80,8 +131,7 @@ void jit_uni_nc_softmax_fwd_t<isa>::execute_forward(
 
 template <cpu_isa_t isa>
 status_t jit_uni_nc_softmax_fwd_t<isa>::pd_t::jit_conf() {
-//    return jit_uni_nc_softmax_fwd_ker_t<isa>::init_conf(jpp_, this);
-   return status::success; //HACK
+    return jit_uni_nc_softmax_fwd_ker_t<isa>::init_conf(jsp_, this);
 }
 
 template <cpu_isa_t isa>
@@ -91,10 +141,10 @@ jit_uni_nc_softmax_fwd_t<isa>::~jit_uni_nc_softmax_fwd_t()
 
 // Explicit instantiation only for supported <isa> values.
 //
-//template struct jit_uni_nc_softmax_fwd_ker_t<avx512_core>;
+template struct jit_uni_nc_softmax_fwd_ker_t<avx512_core>;
 template struct jit_uni_nc_softmax_fwd_t<avx512_core>;
 
-//template struct jit_uni_nc_softmax_fwd_ker_t<avx2>;
+template struct jit_uni_nc_softmax_fwd_ker_t<avx2>;
 template struct jit_uni_nc_softmax_fwd_t<avx2>;
 }
 }

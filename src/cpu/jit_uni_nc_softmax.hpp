@@ -52,11 +52,10 @@ struct jit_uni_nc_softmax_fwd_t : public cpu_primitive_t {
                 && attr()->has_default_values()
                 && memory_desc_matches_tag(*src_md(), format_tag::nc);
             if (!ok) return status::unimplemented;
-						std::cout << "===> JIT SOFTMAX INITIALIZED" << std::endl;
             return jit_conf();
         }
 
-        //jit_softmax_conf_t jsp_; // Do I need that?
+        jit_softmax_conf_t jsp_; // Do I need that?
 
     protected:
         status_t jit_conf();

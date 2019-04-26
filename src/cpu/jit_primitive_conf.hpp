@@ -432,6 +432,15 @@ struct jit_1x1_conv_call_s {
     size_t first_last_flag;
 };
 
+
+/* softmax */
+struct jit_softmax_conf_t {
+    int ndims;
+    int mb, c;
+    // TODO(jczaja): Add axis 
+};
+
+
 /* pooling */
 struct jit_pool_conf_t {
     int ndims;
