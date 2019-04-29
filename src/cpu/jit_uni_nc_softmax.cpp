@@ -78,11 +78,30 @@ void jit_uni_nc_softmax_fwd_ker_t<isa>::generate() {
 
     postamble();
 }
+
+template <cpu_isa_t isa>
+status_t jit_uni_nc_softmax_fwd_ker_t<isa>::init_conf(jit_softmax_conf_t &jpp,
+        const softmax_pd_t *spd) {
+    if (!mayiuse(isa))
+        return status::unimplemented;
+
+//	const auto &sd = *spd->desc();
+	const memory_desc_wrapper src_d(spd->src_md());
+	const memory_desc_wrapper dst_d(spd->dst_md());
+
+	jpp.mb =  src_d.dims()[0];
+  jpp.c  =  src_d.dims()[1];
+  jpp.ndims = 2;
+
+	//TODO(jczaja): implement
+    return status::success;
+}
+
 template <cpu_isa_t isa>
 jit_uni_nc_softmax_fwd_t<isa>::
 jit_uni_nc_softmax_fwd_t(const pd_t *apd)
     : cpu_primitive_t(apd), ker_(nullptr)
-{ ker_ = new jit_uni_nc_softmax_fwd_ker_t<isa>(pd()->jsp_); }
+{ ker_ = new jit_uni_nc_softmax_fwd_ker_t<isa>(/*pd()->jsp_*/); }
 
 template <cpu_isa_t isa>
 void jit_uni_nc_softmax_fwd_t<isa>::execute_forward(
@@ -128,6 +147,7 @@ void jit_uni_nc_softmax_fwd_t<isa>::execute_forward(
     });
   */
 }
+
 
 template <cpu_isa_t isa>
 status_t jit_uni_nc_softmax_fwd_t<isa>::pd_t::jit_conf() {
