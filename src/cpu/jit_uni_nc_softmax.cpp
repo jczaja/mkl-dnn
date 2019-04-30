@@ -47,14 +47,24 @@ struct jit_uni_nc_softmax_fwd_ker_t: public jit_generator {
     Ymm yreg(int idx) const { return Ymm(xreg(idx).getIdx()); }
     Vmm vreg(int idx) const { return Vmm(xreg(idx).getIdx()); }
 
-    Reg64 reg_ptr_src_nc = r8;
-    Reg64 reg_ptr_dst_nc = r9;
+    Reg64 reg_param         = rcx; // Our "unified abi_param1"
+    Reg64 reg_ptr_src_nc    = r8;
+    Reg64 reg_ptr_dst_nc    = r9;
+    Reg64 reg_channel_size  = r10;
+    Reg64 reg_axis          = r11;
 
     jit_softmax_conf_t jsp;
     void (*ker_)(const call_params_t *);
 
     void generate();
     static status_t init_conf(jit_softmax_conf_t &jsp, const softmax_pd_t *spd);
+
+    jit_uni_nc_softmax_fwd_ker_t(const jit_softmax_conf_t &jsp_)
+           : jsp(jsp_) {
+        generate();
+        ker_ = reinterpret_cast<decltype(ker_)>(const_cast<uint8_t*>(
+                       getCode()));
+    }
 };
 
 template <cpu_isa_t isa>
@@ -63,11 +73,10 @@ void jit_uni_nc_softmax_fwd_ker_t<isa>::generate() {
 
 #   define READ_PARAM(reg, field) \
         mov(reg, ptr[reg_param + offsetof(call_params_t, field)])
-//    READ_PARAM(reg_ptr_src_nc, src_nc);
-//    READ_PARAM(reg_ptr_dst_nc, dst_nc);
-//    READ_PARAM(reg_kw, channel_size);
-//    READ_PARAM(reg_kh, axis);
-
+    READ_PARAM(reg_ptr_src_nc, src_nc);
+    READ_PARAM(reg_ptr_dst_nc, dst_nc);
+    READ_PARAM(reg_channel_size,channel_size);
+    READ_PARAM(reg_axis, axis);
 #   undef READ_PARAM
 
     // 1. Get Maximum
@@ -80,7 +89,7 @@ void jit_uni_nc_softmax_fwd_ker_t<isa>::generate() {
 }
 
 template <cpu_isa_t isa>
-status_t jit_uni_nc_softmax_fwd_ker_t<isa>::init_conf(jit_softmax_conf_t &jpp,
+status_t jit_uni_nc_softmax_fwd_ker_t<isa>::init_conf(jit_softmax_conf_t &jsp,
         const softmax_pd_t *spd) {
     if (!mayiuse(isa))
         return status::unimplemented;
@@ -89,9 +98,9 @@ status_t jit_uni_nc_softmax_fwd_ker_t<isa>::init_conf(jit_softmax_conf_t &jpp,
 	const memory_desc_wrapper src_d(spd->src_md());
 	const memory_desc_wrapper dst_d(spd->dst_md());
 
-	jpp.mb =  src_d.dims()[0];
-  jpp.c  =  src_d.dims()[1];
-  jpp.ndims = 2;
+	jsp.mb =  src_d.dims()[0];
+  jsp.c  =  src_d.dims()[1];
+  jsp.ndims = 2;
 
 	//TODO(jczaja): implement
     return status::success;
@@ -101,7 +110,7 @@ template <cpu_isa_t isa>
 jit_uni_nc_softmax_fwd_t<isa>::
 jit_uni_nc_softmax_fwd_t(const pd_t *apd)
     : cpu_primitive_t(apd), ker_(nullptr)
-{ ker_ = new jit_uni_nc_softmax_fwd_ker_t<isa>(/*pd()->jsp_*/); }
+{ ker_ = new jit_uni_nc_softmax_fwd_ker_t<isa>(pd()->jsp_); }
 
 template <cpu_isa_t isa>
 void jit_uni_nc_softmax_fwd_t<isa>::execute_forward(
