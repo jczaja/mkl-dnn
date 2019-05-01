@@ -71,6 +71,11 @@ template <cpu_isa_t isa>
 void jit_uni_nc_softmax_fwd_ker_t<isa>::generate() {
     preamble();
 
+#if !defined(_WIN32)
+    // Always use rcx as abi_param1 regardless OS
+    mov(rcx, rdi);
+#endif
+
 #   define READ_PARAM(reg, field) \
         mov(reg, ptr[reg_param + offsetof(call_params_t, field)])
     READ_PARAM(reg_ptr_src_nc, src_nc);
@@ -94,16 +99,16 @@ status_t jit_uni_nc_softmax_fwd_ker_t<isa>::init_conf(jit_softmax_conf_t &jsp,
     if (!mayiuse(isa))
         return status::unimplemented;
 
-//	const auto &sd = *spd->desc();
+	const auto &sd = *spd->desc();
 	const memory_desc_wrapper src_d(spd->src_md());
 	const memory_desc_wrapper dst_d(spd->dst_md());
 
 	jsp.mb =  src_d.dims()[0];
   jsp.c  =  src_d.dims()[1];
   jsp.ndims = 2;
+  jsp.axis = sd.softmax_axis;
 
-	//TODO(jczaja): implement
-    return status::success;
+  return status::success;
 }
 
 template <cpu_isa_t isa>
@@ -118,17 +123,17 @@ void jit_uni_nc_softmax_fwd_t<isa>::execute_forward(
     auto src_nc = CTX_IN_MEM(const char *, MKLDNN_ARG_SRC);
     auto dst_nc = CTX_OUT_MEM(char *, MKLDNN_ARG_DST);
 
-    //const memory_desc_wrapper src_d(pd()->src_md());
-    //const memory_desc_wrapper dst_d(pd()->dst_md());
+    const memory_desc_wrapper src_d(pd()->src_md());
+    const memory_desc_wrapper dst_d(pd()->dst_md());
 
     (void)src_nc;
     (void)dst_nc;
 
 
     std::cout << "==> JIT SOFTMAX EXECUTION!" << std::endl;    
-/*
-    const auto &jpp = pd()->jpp_;
+    const auto &jsp = pd()->jsp_;
 
+/*
     parallel_nd(jpp.mb, jpp.oh, jpp.ow,
             [&](int n, int oh, int ow) {
         const int ih = nstl::max(oh*jpp.stride_h - jpp.t_pad, 0);
@@ -141,20 +146,19 @@ void jit_uni_nc_softmax_fwd_t<isa>::execute_forward(
         const int kw_end = nstl::min(jpp.kw,
                 jpp.iw + jpp.l_pad - ow * jpp.stride_w);
 
-        auto p = typename jit_uni_i8i8_pooling_fwd_ker_t<isa>::call_params_t();
-        p.src_i8 = &src_i8[
-            src_d.blk_off(n, 0, ih, iw) * src_d.data_type_size()];
-        p.dst_i8 = &dst_i8[
-            dst_d.blk_off(n, 0, oh, ow) * dst_d.data_type_size()];
-        p.kw_range = (size_t)(kw_end - kw_start);
-        p.kh_range = (size_t)(kh_end - kh_start);
-        p.idivider = 1.0f / ((jpp.alg == pooling_avg_exclude_padding) ?
-            p.kh_range*p.kw_range : jpp.kw*jpp.kh);
+  */
+        auto p = typename jit_uni_nc_softmax_fwd_ker_t<isa>::call_params_t();
+        p.src_nc = &src_nc[
+            src_d.blk_off(jsp.mb, jsp.c) * src_d.data_type_size()];
+        p.dst_nc = &dst_nc[
+            dst_d.blk_off(jsp.mb, jsp.c) * dst_d.data_type_size()];
+
+        p.channel_size = jsp.c;
+        p.axis = 1; //TODO(jczaja): add axis
 
         ker_->ker_(&p);
 				
-    });
-  */
+    //}//);
 }
 
 

@@ -437,7 +437,7 @@ struct jit_1x1_conv_call_s {
 struct jit_softmax_conf_t {
     int ndims;
     int mb, c;
-    // TODO(jczaja): Add axis 
+    int axis;
 };
 
 
