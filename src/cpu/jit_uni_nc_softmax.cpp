@@ -53,11 +53,18 @@ struct jit_uni_nc_softmax_fwd_ker_t: public jit_generator {
     Reg64 reg_channel_size  = r10;
     Reg64 reg_axis          = r11;
 
+    Reg64 reg_tmp = rdx;
+    Reg64 reg_tmp2 = r12;
+    Reg64 reg_tmp3 = r13;
+    Reg64 reg_tmp4 = r14;
+
     jit_softmax_conf_t jsp;
     void (*ker_)(const call_params_t *);
 
     void generate();
     static status_t init_conf(jit_softmax_conf_t &jsp, const softmax_pd_t *spd);
+
+    void compute_max();
 
     jit_uni_nc_softmax_fwd_ker_t(const jit_softmax_conf_t &jsp_)
            : jsp(jsp_) {
@@ -85,6 +92,7 @@ void jit_uni_nc_softmax_fwd_ker_t<isa>::generate() {
 #   undef READ_PARAM
 
     // 1. Get Maximum
+    compute_max();
     // 2. subtract maximum
     // 3. exponential values
     // 4. sum of exponential values
@@ -92,6 +100,58 @@ void jit_uni_nc_softmax_fwd_ker_t<isa>::generate() {
 
     postamble();
 }
+
+
+template <cpu_isa_t isa>
+void jit_uni_nc_softmax_fwd_ker_t<isa>::compute_max(){
+
+	Label for_i_label, tail_label, seq_label, done_label;
+
+  //TODO(jczaja): compute number of 8*floats items offline
+  mov (reg_tmp,reg_channel_size);	
+  shr (reg_tmp,3);  // Divide by 8 (eight floats)
+  shl (reg_tmp,2);  // num of Output elements * size of float (4)
+  shl (reg_tmp,5);  // Trunc to 32 bytes 
+
+	// Compute partial maximums
+  vpbroadcastd(ymm0,ptr [reg_ptr_src_nc]);
+  xor_(rax,rax);				// Move offset for next 8 floating point values
+  L(for_i_label);
+    cmp(rax,reg_tmp);
+    jz(tail_label);
+    vmovaps(ymm1,ptr [reg_ptr_src_nc + rax]);  // A
+		add(rax,32);				// Move offset for next 8 floating point values
+		vmaxps(ymm0,ymm0,ymm1);
+    jmp(for_i_label);
+  L(tail_label);
+    sub(rdx,reg_tmp);
+    cmp(rdx,16);  
+    jb(seq_label);
+    vmovaps(xmm2,ptr [rsi + rax]);  // A
+		add(rax,16);				// Move offset for next 4 floating point values
+    sub(rdx,16);
+		vperm2f128(ymm2,ymm2,ymm2,0);
+		vmaxps(ymm0,ymm0,ymm2);  //partial maxes in ymm0
+  L(seq_label);
+	  cmp(rdx,0);
+    jz(done_label);	
+		vpbroadcastd(ymm2,ptr [rsi + rax]);
+		vmaxps(ymm0,ymm0,ymm2);  //partial maxes in ymm0
+    sub(rdx,4);
+    add(rax,4);
+    jmp(seq_label);
+  L(done_label);
+  // Get within shortlisted buffer maximum
+	vperm2f128(ymm1,ymm0,ymm0,1);
+  vmaxps(ymm0,ymm0,ymm1);  //partial maxes in ymm0
+  vpermilps(xmm1,xmm0,0x1B);
+  vmaxps(ymm0,ymm0,ymm1);  //partial maxes in ymm0
+  vpermilps(xmm1,xmm0,1);
+  vmaxps(ymm0,ymm0,ymm1);  //ymm0[0:31] contains global maximum
+
+	// Maximum is stored in XMM0
+}
+
 
 template <cpu_isa_t isa>
 status_t jit_uni_nc_softmax_fwd_ker_t<isa>::init_conf(jit_softmax_conf_t &jsp,
@@ -136,9 +196,6 @@ void jit_uni_nc_softmax_fwd_t<isa>::execute_forward(
 /*
     parallel_nd(jpp.mb, jpp.oh, jpp.ow,
             [&](int n, int oh, int ow) {
-        const int ih = nstl::max(oh*jpp.stride_h - jpp.t_pad, 0);
-        const int iw = nstl::max(ow*jpp.stride_w - jpp.l_pad, 0);
-
         const int kh_start = nstl::max(0, jpp.t_pad - oh * jpp.stride_h);
         const int kh_end = nstl::min(jpp.kh,
                 jpp.ih + jpp.t_pad - oh * jpp.stride_h);
@@ -154,7 +211,7 @@ void jit_uni_nc_softmax_fwd_t<isa>::execute_forward(
             dst_d.blk_off(jsp.mb, jsp.c) * dst_d.data_type_size()];
 
         p.channel_size = jsp.c;
-        p.axis = 1; //TODO(jczaja): add axis
+        p.axis = jsp.axis;
 
         ker_->ker_(&p);
 				
