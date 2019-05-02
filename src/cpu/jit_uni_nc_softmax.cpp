@@ -65,6 +65,7 @@ struct jit_uni_nc_softmax_fwd_ker_t: public jit_generator {
     static status_t init_conf(jit_softmax_conf_t &jsp, const softmax_pd_t *spd);
 
     void compute_max();
+    void compute_sub();
 
     jit_uni_nc_softmax_fwd_ker_t(const jit_softmax_conf_t &jsp_)
            : jsp(jsp_) {
@@ -94,6 +95,7 @@ void jit_uni_nc_softmax_fwd_ker_t<isa>::generate() {
     // 1. Get Maximum
     compute_max();
     // 2. subtract maximum
+    compute_sub();
     // 3. exponential values
     // 4. sum of exponential values
     // 5. scale exponential value with computed sum
@@ -127,7 +129,7 @@ void jit_uni_nc_softmax_fwd_ker_t<isa>::compute_max(){
     sub(rdx,reg_tmp);
     cmp(rdx,16);  
     jb(seq_label);
-    vmovaps(xmm2,ptr [rsi + rax]);  // A
+    vmovaps(xmm2,ptr [reg_ptr_src_nc + rax]);  // A
 		add(rax,16);				// Move offset for next 4 floating point values
     sub(rdx,16);
 		vperm2f128(ymm2,ymm2,ymm2,0);
@@ -135,7 +137,7 @@ void jit_uni_nc_softmax_fwd_ker_t<isa>::compute_max(){
   L(seq_label);
 	  cmp(rdx,0);
     jz(done_label);	
-		vpbroadcastd(ymm2,ptr [rsi + rax]);
+		vpbroadcastd(ymm2,ptr [reg_ptr_src_nc + rax]);
 		vmaxps(ymm0,ymm0,ymm2);  //partial maxes in ymm0
     sub(rdx,4);
     add(rax,4);
@@ -152,6 +154,48 @@ void jit_uni_nc_softmax_fwd_ker_t<isa>::compute_max(){
 	// Maximum is stored in XMM0
 }
 
+template <cpu_isa_t isa>
+void jit_uni_nc_softmax_fwd_ker_t<isa>::compute_sub(){
+
+	Label for_i_label, tail_label, seq_label, done_label;
+
+  //TODO(jczaja): compute number of 8*floats items offline
+  mov (reg_tmp,reg_channel_size);
+  shr (reg_tmp,3);  // Divide by 8 (eight floats)
+  shl (reg_tmp,2);  // num of Output elements * size of float (4)
+  shl (reg_tmp,5);  // Trunc to 32 bytes 
+
+	// Compute partial maximums
+  vpbroadcastd(ymm0,ptr [reg_ptr_src_nc]);
+  xor_(rax,rax);				// Move offset for next 8 floating point values
+  L(for_i_label);
+    cmp(rax,reg_tmp);
+    jz(tail_label);
+    vmovaps(ymm1,ptr [reg_ptr_src_nc + rax]);
+		vsubps(ymm1,ymm1,ymm0);
+		vmovaps(ptr[reg_ptr_dst_nc + rax],ymm1);
+		add(rax,32);				// Move offset for next 8 floating point values
+    jmp(for_i_label);
+  L(tail_label);
+    sub(rdx,reg_tmp);
+    cmp(rdx,16);  
+    jb(seq_label);
+    vmovaps(xmm1, ptr [reg_ptr_src_nc + rax]);  // A
+    sub(rdx,16);
+		vsubps(xmm1, xmm1, xmm0);
+		vmovaps(ptr[reg_ptr_dst_nc + rax],xmm1);
+		add(rax,16);				// Move offset for next 4 floating point values
+  L(seq_label);
+	  cmp(rdx,0);
+    jz(done_label);	
+		vpbroadcastd(ymm1, ptr [reg_ptr_src_nc + rax]);
+    sub(rdx,4);
+		vsubps(ymm1,ymm1,ymm0);
+    vmovss(ptr [reg_ptr_dst_nc + rax], xmm1);
+    add(rax,4);
+    jmp(seq_label);
+  L(done_label);
+}
 
 template <cpu_isa_t isa>
 status_t jit_uni_nc_softmax_fwd_ker_t<isa>::init_conf(jit_softmax_conf_t &jsp,
@@ -190,7 +234,7 @@ void jit_uni_nc_softmax_fwd_t<isa>::execute_forward(
     (void)dst_nc;
 
 
-    std::cout << "==> JIT SOFTMAX EXECUTION!" << std::endl;    
+    std::cout << "==> JIT SOFTMAX EXECUTION!" << std::endl;
     const auto &jsp = pd()->jsp_;
 
 /*
