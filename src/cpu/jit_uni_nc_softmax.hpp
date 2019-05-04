@@ -24,6 +24,7 @@
 
 #include "cpu_isa_traits.hpp"
 #include "jit_primitive_conf.hpp"
+#include "jit_uni_eltwise.hpp"
 
 namespace mkldnn {
 namespace impl {
@@ -36,6 +37,7 @@ template <cpu_isa_t isa>
 struct jit_uni_nc_softmax_fwd_t : public cpu_primitive_t {
     struct pd_t : public cpu_softmax_fwd_pd_t {
         using cpu_softmax_fwd_pd_t::cpu_softmax_fwd_pd_t;
+
 
         DECLARE_COMMON_PD_T(
                 JIT_IMPL_NAME_HELPER("jit:", isa, ""),
@@ -55,7 +57,7 @@ struct jit_uni_nc_softmax_fwd_t : public cpu_primitive_t {
             return jit_conf();
         }
 
-        jit_softmax_conf_t jsp_; // Do I need that?
+        jit_softmax_conf_t jsp_;
 
     protected:
         status_t jit_conf();

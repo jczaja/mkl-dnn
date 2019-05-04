@@ -663,6 +663,7 @@ int jit_uni_eltwise_injector_f32<isa>::aux_vecs_count(alg_kind_t alg_) {
     switch (alg_) {
     case alg_kind::eltwise_relu: return (alpha_ == 0.f) ? 0 : 2;
     case alg_kind::eltwise_elu: return 4;
+    case alg_kind::eltwise_exp: return 4; 	// 4 seems to be a safe value 
     case alg_kind::eltwise_tanh: return 5;
     case alg_kind::eltwise_square: return 0;
     case alg_kind::eltwise_abs: return 0;
@@ -688,6 +689,7 @@ void jit_uni_eltwise_injector_f32<isa>::compute_body(size_t start_idx,
             else relu_compute_vector(Vmm(idx));
             break;
         case eltwise_elu: elu_compute_vector(Vmm(idx)); break;
+        case eltwise_exp: exp_compute_vector(Vmm(idx)); break;
         case eltwise_tanh: tanh_compute_vector(Vmm(idx)); break;
         case eltwise_square: square_compute_vector(Vmm(idx)); break;
         case eltwise_abs: abs_compute_vector(Vmm(idx)); break;
@@ -724,6 +726,7 @@ void jit_uni_eltwise_injector_f32<isa>::prepare_table(bool gen_table) {
         switch (alg_) {
         case eltwise_relu: relu_prepare_table(); break;
         case eltwise_elu:
+        case eltwise_exp:
         case eltwise_tanh:
         case eltwise_logistic:
             elu_prepare_table(); break;
@@ -919,7 +922,7 @@ struct jit_uni_kernel_fwd_f32: public jit_uni_eltwise_kernel_f32,
         using namespace alg_kind;
 
         assert(is_bwd() == false);
-        assert(utils::one_of(desc.alg_kind, eltwise_tanh, eltwise_elu,
+        assert(utils::one_of(desc.alg_kind, eltwise_tanh, eltwise_elu, eltwise_exp,
                     eltwise_square, eltwise_abs, eltwise_sqrt, eltwise_linear,
                     eltwise_bounded_relu, eltwise_soft_relu, eltwise_logistic));
 
@@ -1008,7 +1011,7 @@ status_t jit_uni_eltwise_fwd_t<isa>::pd_t::init() {
         && utils::everyone_is(data_type::f32, desc()->data_desc.data_type)
         && !has_zero_dim_memory()
         && utils::one_of(desc()->alg_kind, eltwise_relu, eltwise_tanh,
-                eltwise_elu, eltwise_square, eltwise_abs, eltwise_sqrt,
+                eltwise_exp, eltwise_elu, eltwise_square, eltwise_abs, eltwise_sqrt,
                 eltwise_linear, eltwise_bounded_relu, eltwise_soft_relu,
                 eltwise_logistic)
         && memory_desc_wrapper(src_md()).is_dense(true)

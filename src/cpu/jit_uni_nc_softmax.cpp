@@ -42,6 +42,10 @@ struct jit_uni_nc_softmax_fwd_ker_t: public jit_generator {
         size_t axis;
     };
 
+    typedef typename utils::conditional<isa == avx512_core,
+            jit_uni_eltwise_injector_f32<avx512_common>,
+            jit_uni_eltwise_injector_f32<isa>>::type injector_t;
+
     using Vmm = typename cpu_isa_traits<isa>::Vmm;
     Xmm xreg(int idx) const { return Xmm(idx); }
     Ymm yreg(int idx) const { return Ymm(xreg(idx).getIdx()); }
@@ -59,6 +63,7 @@ struct jit_uni_nc_softmax_fwd_ker_t: public jit_generator {
     Reg64 reg_tmp4 = r14;
 
     jit_softmax_conf_t jsp;
+    injector_t *vsexp_injector_;
     void (*ker_)(const call_params_t *);
 
     void generate();
@@ -69,6 +74,9 @@ struct jit_uni_nc_softmax_fwd_ker_t: public jit_generator {
 
     jit_uni_nc_softmax_fwd_ker_t(const jit_softmax_conf_t &jsp_)
            : jsp(jsp_) {
+        
+        vsexp_injector_ = new injector_t(this,
+                alg_kind::eltwise_exp, 0.0f, 0.0f, true, rax);
         generate();
         ker_ = reinterpret_cast<decltype(ker_)>(const_cast<uint8_t*>(
                        getCode()));

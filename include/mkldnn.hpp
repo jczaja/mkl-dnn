@@ -230,6 +230,7 @@ enum algorithm {
     eltwise_relu = mkldnn_eltwise_relu,
     eltwise_tanh = mkldnn_eltwise_tanh,
     eltwise_elu = mkldnn_eltwise_elu,
+    eltwise_exp= mkldnn_eltwise_exp,
     eltwise_square = mkldnn_eltwise_square,
     eltwise_abs = mkldnn_eltwise_abs,
     eltwise_sqrt = mkldnn_eltwise_sqrt,

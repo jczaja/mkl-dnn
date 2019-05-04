@@ -66,6 +66,7 @@ namespace alg_kind {
     const alg_kind_t eltwise_relu = mkldnn_eltwise_relu;
     const alg_kind_t eltwise_tanh = mkldnn_eltwise_tanh;
     const alg_kind_t eltwise_elu = mkldnn_eltwise_elu;
+    const alg_kind_t eltwise_exp = mkldnn_eltwise_exp;
     const alg_kind_t eltwise_square = mkldnn_eltwise_square;
     const alg_kind_t eltwise_abs = mkldnn_eltwise_abs;
     const alg_kind_t eltwise_sqrt = mkldnn_eltwise_sqrt;
