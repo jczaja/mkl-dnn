@@ -529,6 +529,8 @@ typedef enum {
     mkldnn_eltwise_soft_relu = 0x9f,
     /** Eltwise: logistic */
     mkldnn_eltwise_logistic = 0xaf,
+    //  Eltwise: swish 
+    mkldnn_eltwise_swish = 0xbf,
     /** Max pooling */
     mkldnn_pooling_max = 0x1ff,
     /** Average pooling include padding */
