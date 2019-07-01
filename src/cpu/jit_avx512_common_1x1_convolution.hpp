@@ -127,7 +127,7 @@ struct jit_avx512_common_1x1_convolution_fwd_t : public cpu_primitive_t {
 
     jit_avx512_common_1x1_convolution_fwd_t(const pd_t *apd,
             const input_vector &inputs, const output_vector &outputs)
-        : cpu_primitive_t(apd, inputs, outputs)
+        : cpu_primitive_t(apd, inputs, outputs, true)
         , kernel_(nullptr), rtus_driver_(nullptr)
     {
         kernel_ =
