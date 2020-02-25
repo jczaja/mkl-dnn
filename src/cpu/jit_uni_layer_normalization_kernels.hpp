@@ -90,10 +90,13 @@ private:
 
         //compute var
         vbroadcastss(ymm_mean, Xmm(0));
-        compute([=](Ymm ymm_dst) {
-            vsubps(ymm_src, ymm_mean, ymm_src);
-            vfmadd231ps(ymm_dst, ymm_src, ymm_src);
-        });
+        //compute([=](Ymm ymm_dst) {
+        //    vsubps(ymm_src, ymm_mean, ymm_src);
+        //    vfmadd231ps(ymm_dst, ymm_src, ymm_src);
+        //});
+        compute_var();
+
+
         movss(ptr[reg_var], Xmm(0));
 
         postamble();
@@ -167,6 +170,101 @@ private:
         divss(Xmm(0), xmm_tmp);
     };
 
+    void compute_var() {
+        using namespace Xbyak;
+
+        std::vector<Xbyak::Ymm> ymm_srcs[6] = 
+           { ymm_src, Ymm(8), Ymm(9), Ymm(10), Ymm(11), Ymm(12)};
+        const int C_vecs = C_ / simd_w_;
+
+        vpxor(Ymm(0), Ymm(0), Ymm(0));
+        if (C_vecs > 0) {
+            const int unroll = C_vecs >= unroll_factor_ ? unroll_factor_ : 1;
+            assert(math::is_pow2(unroll));
+
+            for (int i = 1; i < unroll; i++)
+                vpxor(Ymm(i), Ymm(i), Ymm(i));
+
+            // unrolled loop
+            for (int i = 0; i < C_vecs / unroll; i++) {
+                    load_src(ymm_src, simd_w_,
+                            (i * unroll + 0) * simd_w_ * sizeof(float));
+                    vsubps(ymm_src, ymm_mean, ymm_src);
+                    load_src(ymm_src2, simd_w_,
+                            (i * unroll + 1) * simd_w_ * sizeof(float));
+                    vsubps(ymm_src2, ymm_mean, ymm_src2);
+                    vfmadd231ps(Ymm(0), ymm_src, ymm_src);
+                    vfmadd231ps(Ymm(1), ymm_src2, ymm_src2);
+
+                    load_src(ymm_src3, simd_w_,
+                            (i * unroll + 2) * simd_w_ * sizeof(float));
+                    vsubps(ymm_src3, ymm_mean, ymm_src3);
+                    load_src(ymm_src4, simd_w_,
+                            (i * unroll + 3) * simd_w_ * sizeof(float));
+                    vsubps(ymm_src4, ymm_mean, ymm_src4);
+                    vfmadd231ps(Ymm(2), ymm_src3, ymm_src3);
+                    vfmadd231ps(Ymm(3), ymm_src4, ymm_src4);
+
+                    load_src(ymm_src5, simd_w_,
+                            (i * unroll + 4) * simd_w_ * sizeof(float));
+                    vsubps(ymm_src5, ymm_mean, ymm_src5);
+                    load_src(ymm_src6, simd_w_,
+                            (i * unroll + 5) * simd_w_ * sizeof(float));
+                    vsubps(ymm_src6, ymm_mean, ymm_src6);
+                    vfmadd231ps(Ymm(4), ymm_src5, ymm_src5);
+                    vfmadd231ps(Ymm(5), ymm_src6, ymm_src6);
+
+                    load_src(ymm_src, simd_w_,
+                            (i * unroll + 6) * simd_w_ * sizeof(float));
+                    vsubps(ymm_src, ymm_mean, ymm_src);
+                    load_src(ymm_src2, simd_w_,
+                            (i * unroll + 7) * simd_w_ * sizeof(float));
+                    vsubps(ymm_src2, ymm_mean, ymm_src2);
+                    vfmadd231ps(Ymm(6), ymm_src, ymm_src);
+                    vfmadd231ps(Ymm(7), ymm_src2, ymm_src2);
+                }
+
+            // unrolled loop reduction
+            int n = unroll;
+            while (n > 1) {
+                for (int j = 0; j < n / 2; j++)
+                    vaddps(Ymm(j), Ymm(j), Ymm(j + n / 2));
+                n = n / 2;
+            }
+
+            // unrolled loop remainder
+            for (int i = utils::rnd_dn(C_vecs, unroll); i < C_vecs; i++) {
+                load_src(ymm_src, simd_w_, i * simd_w_ * sizeof(float));
+//                op(Ymm(0));
+                vsubps(ymm_src, ymm_mean, ymm_src);
+                vfmadd231ps(Ymm(0), ymm_src, ymm_src);
+            }
+
+            // vector reduction
+            Xmm xmm_high = Xmm(1);
+            vextractf128(xmm_high, Ymm(0), 1);
+            vaddps(Xmm(0), xmm_high, Xmm(0));
+            vhaddps(Xmm(0), Xmm(0), Xmm(0));
+            vhaddps(Xmm(0), Xmm(0), Xmm(0));
+        }
+
+        // vector remainder
+        for (int i = utils::rnd_dn(C_, simd_w_); i < C_; i++) {
+            load_src(ymm_src, 1, i * sizeof(float));
+            //op(Ymm(0));
+            vsubps(ymm_src, ymm_mean, ymm_src);
+            vfmadd231ps(Ymm(0), ymm_src, ymm_src);
+        }
+
+        // scale
+        Xmm xmm_tmp = Xmm(ymm_src.getIdx());
+        mov(reg_tmp, float2int(C_));
+        uni_vmovq(xmm_tmp, reg_tmp);
+        divss(Xmm(0), xmm_tmp);
+    };
+
+
+
     Xbyak::Reg64 reg_param = abi_param1;
     Xbyak::Reg64 reg_src = rdx;
     Xbyak::Reg64 reg_mean = rbx;
@@ -176,6 +274,7 @@ private:
     // vector registers 0 .. unroll_factor_ are reseved for unrolling
     Xbyak::Ymm ymm_src = Xbyak::Ymm(14);
     Xbyak::Ymm ymm_mean = Xbyak::Ymm(15);
+
 };
 
 class data_kernel_t : jit_generator {
