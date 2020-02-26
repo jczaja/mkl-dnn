@@ -190,9 +190,9 @@ private:
                 for (int j = 0; j < unroll; j+=2) {
                     load_src(ymm_srcs[j], simd_w_,
                             (i * unroll + j) * simd_w_ * sizeof(float));
-                    vsubps(ymm_srcs[j], ymm_mean, ymm_srcs[j]);
                     load_src(ymm_srcs[j+1], simd_w_,
                             (i * unroll + j + 1) * simd_w_ * sizeof(float));
+                    vsubps(ymm_srcs[j], ymm_mean, ymm_srcs[j]);
                     vsubps(ymm_srcs[j+1], ymm_mean, ymm_srcs[j+1]);
                     vfmadd231ps(Ymm(j), ymm_srcs[j], ymm_srcs[j]);
                     vfmadd231ps(Ymm(j+1), ymm_srcs[j+1], ymm_srcs[j+1]);
