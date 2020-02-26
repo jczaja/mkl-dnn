@@ -85,7 +85,8 @@ private:
 #undef PARAM_OFF
 
         // compute mean
-        compute([=](Ymm ymm_dst) { vaddps(ymm_dst, ymm_dst, ymm_src); });
+        //compute([=](Ymm ymm_dst) { vaddps(ymm_dst, ymm_dst, ymm_src); });
+        compute_mean();
         movss(ptr[reg_mean], Xmm(0));
 
         //compute var
@@ -113,10 +114,11 @@ private:
             assert(!"unsupported nelems for load src");
     }
 
-    template <typename F>
-    void compute(F op) {
+    void compute_mean() {
         using namespace Xbyak;
 
+        std::vector<Xbyak::Ymm> ymm_srcs =
+           { Ymm(14), Ymm(8), Ymm(9), Ymm(10), Ymm(11), Ymm(12), Ymm(14), Ymm(8)};
         const int C_vecs = C_ / simd_w_;
 
         vpxor(Ymm(0), Ymm(0), Ymm(0));
@@ -129,10 +131,13 @@ private:
 
             // unrolled loop
             for (int i = 0; i < C_vecs / unroll; i++)
-                for (int j = 0; j < unroll; j++) {
-                    load_src(ymm_src, simd_w_,
+                for (int j = 0; j < unroll; j+=2) {
+                    load_src(ymm_srcs[j], simd_w_,
                             (i * unroll + j) * simd_w_ * sizeof(float));
-                    op(Ymm(j));
+                    load_src(ymm_srcs[j+1], simd_w_,
+                            (i * unroll + j + 1) * simd_w_ * sizeof(float));
+                    vaddps(Ymm(j), Ymm(j), ymm_srcs[j]);
+                    vaddps(Ymm(j+1), Ymm(j+1), ymm_srcs[j+1]);
                 }
 
             // unrolled loop reduction
@@ -146,7 +151,8 @@ private:
             // unrolled loop remainder
             for (int i = utils::rnd_dn(C_vecs, unroll); i < C_vecs; i++) {
                 load_src(ymm_src, simd_w_, i * simd_w_ * sizeof(float));
-                op(Ymm(0));
+                //op(Ymm(0));
+                vaddps(Ymm(0), Ymm(0), ymm_src);
             }
 
             // vector reduction
@@ -160,7 +166,8 @@ private:
         // vector remainder
         for (int i = utils::rnd_dn(C_, simd_w_); i < C_; i++) {
             load_src(ymm_src, 1, i * sizeof(float));
-            op(Ymm(0));
+            //op(Ymm(0));
+            vaddps(Ymm(0), Ymm(0), ymm_src);
         }
 
         // scale
