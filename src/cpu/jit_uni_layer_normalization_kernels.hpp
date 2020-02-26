@@ -117,8 +117,6 @@ private:
     void compute_mean() {
         using namespace Xbyak;
 
-        std::vector<Xbyak::Ymm> ymm_srcs =
-           { Ymm(14), Ymm(8), Ymm(9), Ymm(10), Ymm(11), Ymm(12), Ymm(14), Ymm(8)};
         const int C_vecs = C_ / simd_w_;
 
         vpxor(Ymm(0), Ymm(0), Ymm(0));
@@ -131,13 +129,10 @@ private:
 
             // unrolled loop
             for (int i = 0; i < C_vecs / unroll; i++)
-                for (int j = 0; j < unroll; j+=2) {
-                    load_src(ymm_srcs[j], simd_w_,
+                for (int j = 0; j < unroll; j+=1) {
+                    load_src(ymm_src, simd_w_,
                             (i * unroll + j) * simd_w_ * sizeof(float));
-                    load_src(ymm_srcs[j+1], simd_w_,
-                            (i * unroll + j + 1) * simd_w_ * sizeof(float));
-                    vaddps(Ymm(j), Ymm(j), ymm_srcs[j]);
-                    vaddps(Ymm(j+1), Ymm(j+1), ymm_srcs[j+1]);
+                    vaddps(Ymm(j), Ymm(j), ymm_src);
                 }
 
             // unrolled loop reduction
@@ -151,7 +146,6 @@ private:
             // unrolled loop remainder
             for (int i = utils::rnd_dn(C_vecs, unroll); i < C_vecs; i++) {
                 load_src(ymm_src, simd_w_, i * simd_w_ * sizeof(float));
-                //op(Ymm(0));
                 vaddps(Ymm(0), Ymm(0), ymm_src);
             }
 
@@ -166,7 +160,6 @@ private:
         // vector remainder
         for (int i = utils::rnd_dn(C_, simd_w_); i < C_; i++) {
             load_src(ymm_src, 1, i * sizeof(float));
-            //op(Ymm(0));
             vaddps(Ymm(0), Ymm(0), ymm_src);
         }
 
@@ -194,15 +187,23 @@ private:
 
             // unrolled loop
             for (int i = 0; i < C_vecs / unroll; i++) {
-                for (int j = 0; j < unroll; j+=2) {
+                for (int j = 0; j < unroll; j+=4) {
                     load_src(ymm_srcs[j], simd_w_,
                             (i * unroll + j) * simd_w_ * sizeof(float));
                     load_src(ymm_srcs[j+1], simd_w_,
                             (i * unroll + j + 1) * simd_w_ * sizeof(float));
+                    load_src(ymm_srcs[j+2], simd_w_,
+                            (i * unroll + j + 2) * simd_w_ * sizeof(float));
+                    load_src(ymm_srcs[j+3], simd_w_,
+                            (i * unroll + j + 3) * simd_w_ * sizeof(float));
                     vsubps(ymm_srcs[j], ymm_mean, ymm_srcs[j]);
                     vsubps(ymm_srcs[j+1], ymm_mean, ymm_srcs[j+1]);
+                    vsubps(ymm_srcs[j+2], ymm_mean, ymm_srcs[j+2]);
+                    vsubps(ymm_srcs[j+3], ymm_mean, ymm_srcs[j+3]);
                     vfmadd231ps(Ymm(j), ymm_srcs[j], ymm_srcs[j]);
                     vfmadd231ps(Ymm(j+1), ymm_srcs[j+1], ymm_srcs[j+1]);
+                    vfmadd231ps(Ymm(j+2), ymm_srcs[j+2], ymm_srcs[j+2]);
+                    vfmadd231ps(Ymm(j+3), ymm_srcs[j+3], ymm_srcs[j+3]);
 
 //                    load_src(ymm_src3, simd_w_,
 //                            (i * unroll + 2) * simd_w_ * sizeof(float));
