@@ -87,6 +87,7 @@ struct kernel_t {
     struct desc_t {
         int id;
         prb_t prb;
+        bool large_data {false};
     };
 
     kernel_t(const desc_t &desc) : desc_(desc) {}

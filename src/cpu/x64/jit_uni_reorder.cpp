@@ -219,7 +219,7 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
                 step_size);
     }
 
-    void tr8x8_avx2(int i_off, int o_off) {
+    void tr8x8_avx2(int i_off, int o_off, bool use_nt_stores) {
         using namespace data_type;
 
         const auto cvt2ps
@@ -314,11 +314,20 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
 
         auto store = [=](const Address &addr, const Ymm &ymm, int size) {
             Xmm xmm = Xmm(ymm.getIdx());
-            switch (size) {
-                case 32: vmovups(addr, ymm); break;
-                case 16: vmovups(addr, xmm); break;
-                case 8: vmovsd(addr, xmm); break;
-                default: assert(!"unreachable");
+            if (use_nt_stores) {
+                switch (size) {
+                    case 32: vmovntps(addr, ymm); break;
+                    case 16: vmovntps(addr, xmm); break;
+                    case 8: vmovsd(addr, xmm); break;
+                    default: assert(!"unreachable");
+                }
+            } else {
+                switch (size) {
+                    case 32: vmovups(addr, ymm); break;
+                    case 16: vmovups(addr, xmm); break;
+                    case 8: vmovsd(addr, xmm); break;
+                    default: assert(!"unreachable");
+                }
             }
         };
 
@@ -385,34 +394,41 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
                 && prb_.scale_type == scale_type_t::NONE && prb_.beta == 0.f;
     }
 
-    bool process_unroll_tr8x8(int len) {
+    bool process_unroll_tr8x8(int len, bool use_nt_stores) {
         if (!can_do_tr8x8()) return false;
 
         const int step_size = n(0) * n(1);
         int i_off = 0, o_off = 0;
         for (int off = 0; off < len; off += step_size) {
             step(off, i_off, o_off, i_off, o_off, step_size);
-            tr8x8_avx2(i_off, o_off);
+            tr8x8_avx2(i_off, o_off, use_nt_stores);
         }
 
         return true;
     }
 
     template <cpu_isa_t isa>
-    bool process_direct_copy(int len) {
+    bool can_do_direct_copy(int len) {
         using namespace data_type;
 
-        using Vmm = typename cpu_isa_traits<isa>::Vmm;
         const int simd_w = cpu_isa_traits<isa>::vlen / itype_sz;
 
-        bool can_do = true && mayiuse(isa)
-                && utils::everyone_is(1, os(0), is(0))
+        return mayiuse(isa) && utils::everyone_is(1, os(0), is(0))
                 && (false || prb_.itype == prb_.otype
                         || (prb_.itype == s32 && prb_.otype == f32)
                         || (prb_.itype == f32 && prb_.otype == s32))
                 && len % simd_w == 0 && n(0) % len == 0
                 && prb_.scale_type == scale_type_t::NONE && prb_.beta == 0.f;
-        if (!can_do) return false;
+    }
+
+    template <cpu_isa_t isa>
+    bool process_direct_copy(int len, bool use_nt_stores) {
+        using namespace data_type;
+
+        using Vmm = typename cpu_isa_traits<isa>::Vmm;
+        const int simd_w = cpu_isa_traits<isa>::vlen / itype_sz;
+
+        if (!can_do_direct_copy<isa>(len)) return false;
 
         for (int off = 0; off < len;) {
             // TODO: we need extra reg for proper saturation if otype == s32
@@ -433,8 +449,12 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
                 }
             }
 
-            for (int ur = 0; ur < unroll; ++ur)
-                uni_vmovups(o_addr(off + ur * simd_w), Vmm(ur));
+            for (int ur = 0; ur < unroll; ++ur) {
+                if (use_nt_stores)
+                    uni_vmovntps(o_addr(off + ur * simd_w), Vmm(ur));
+                else
+                    uni_vmovups(o_addr(off + ur * simd_w), Vmm(ur));
+            }
 
             off += unroll * simd_w;
         }
@@ -443,7 +463,7 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
     }
 
     void process_unroll_generic_step(int reg_unroll, const int *i_off,
-            const int *o_off, const int *s_off) {
+            const int *o_off, const int *s_off, bool use_nt_stores) {
         using namespace data_type;
 
         // TODO: Clean up the code by using "uni" instructions once
@@ -589,7 +609,12 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
 
         auto store = [=](const Address &addr, const Xmm &xmm, int size) {
             switch (size) {
-                case 16: uni_vmovups(addr, xmm); break;
+                case 16:
+                    if (use_nt_stores)
+                        uni_vmovntps(addr, xmm);
+                    else
+                        uni_vmovups(addr, xmm);
+                    break;
                 case 8: uni_vmovsd(addr, xmm); break;
                 case 4: uni_vmovss(addr, xmm); break;
                 case 2: uni_vpextrw(addr, xmm, 0x0); break;
@@ -810,7 +835,7 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
         }
     }
 
-    void process_unroll_generic(int len) {
+    void process_unroll_generic(int len, bool use_nt_stores) {
         const int blk = 8;
 
         int i_off[2 * blk] = {0};
@@ -831,7 +856,7 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
             }
 
             process_unroll_generic_step(reg_unroll, i_off + curr * blk,
-                    o_off + curr * blk, s_off + curr * blk);
+                    o_off + curr * blk, s_off + curr * blk, use_nt_stores);
 
             curr = 1 - curr;
         }
@@ -857,22 +882,14 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
             sub(reg_off_scale, len * s_step * stype_sz);
     }
 
-    bool simple_impl() {
-        simple_impl_desc_t d;
-        if (!simple_impl_desc_init(prb_, &d)) return false;
+    void simple_impl_loop(const simple_impl_desc_t &d, bool use_nt_stores) {
+        Label l_loop[3];
+        Reg64 reg_cnt[3] = {r15, r14, r13};
 
         const int nfu = d.ndims_full_unroll;
         const int ldu = d.len_last_dim_unroll;
         const int n_jit_loops = prb_.ndims - d.ndims_full_unroll;
         assert(n_jit_loops <= ndims_jit_loop_max);
-
-        xor_(reg_off_in, reg_off_in);
-        xor_(reg_off_out, reg_off_out);
-        if (prb_.scale_type == scale_type_t::MANY)
-            xor_(reg_off_scale, reg_off_scale);
-
-        Label l_loop[3];
-        Reg64 reg_cnt[3] = {r15, r14, r13};
 
         if (n_jit_loops > 2) loop_begin(l_loop[2], reg_cnt[2], n(nfu + 2));
 
@@ -882,10 +899,13 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
             loop_begin(l_loop[0], reg_cnt[0], n(nfu + 0) / ldu);
 
         bool optimized = false;
-        optimized = optimized || process_direct_copy<avx>(d.len_unroll);
-        optimized = optimized || process_direct_copy<sse41>(d.len_unroll);
-        optimized = optimized || process_unroll_tr8x8(d.len_unroll);
-        if (!optimized) process_unroll_generic(d.len_unroll);
+        optimized = optimized
+                || process_direct_copy<avx>(d.len_unroll, use_nt_stores);
+        optimized = optimized
+                || process_direct_copy<sse41>(d.len_unroll, use_nt_stores);
+        optimized = optimized
+                || process_unroll_tr8x8(d.len_unroll, use_nt_stores);
+        if (!optimized) process_unroll_generic(d.len_unroll, use_nt_stores);
 
         if (n_jit_loops > 0)
             loop_end(l_loop[0], reg_cnt[0], n(nfu + 0) / ldu, is(nfu + 0) * ldu,
@@ -898,6 +918,64 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
         if (n_jit_loops > 2)
             loop_end(l_loop[2], reg_cnt[2], n(nfu + 2), is(nfu + 2),
                     os(nfu + 2), ss(nfu + 2));
+    }
+
+    bool can_use_streaming(const simple_impl_desc_t &d, size_t width) {
+        if (!desc_.large_data) return false;
+
+        const int nfu = d.ndims_full_unroll;
+        const int ldu = d.len_last_dim_unroll;
+        const int n_jit_loops = prb_.ndims - d.ndims_full_unroll;
+        assert(n_jit_loops <= ndims_jit_loop_max);
+
+        /*
+         * We need to make sure the NT instructions e.g.
+         * movntps %xmm0, 0x20(%rdx,%r9)
+         * refer to aligned addresses.
+         *
+         * The starting address ( %rdx ) is checked at runtime,
+         * The offset %r9 in the above example is incremented by these values:
+        */
+        if (n_jit_loops > 0 && (os(nfu + 0) * ldu * otype_sz) % width != 0)
+            return false;
+
+        if (n_jit_loops > 1 && (os(nfu + 1) * ldu * otype_sz) % width != 0)
+            return false;
+
+        if (n_jit_loops > 2 && (os(nfu + 2) * ldu * otype_sz) % width != 0)
+            return false;
+
+        return true;
+    }
+
+    bool simple_impl() {
+        simple_impl_desc_t d;
+        if (!simple_impl_desc_init(prb_, &d)) return false;
+
+        xor_(reg_off_in, reg_off_in);
+        xor_(reg_off_out, reg_off_out);
+        if (prb_.scale_type == scale_type_t::MANY)
+            xor_(reg_off_scale, reg_off_scale);
+
+        size_t alignment_needed_for_streaming = 16;
+        if (can_do_direct_copy<avx>(d.len_unroll) || can_do_tr8x8())
+            alignment_needed_for_streaming = 32;
+
+        if (can_use_streaming(d, alignment_needed_for_streaming)) {
+            Label non_streaming_loop_start;
+            Label non_streaming_loop_end;
+
+            test(reg_ptr_out, alignment_needed_for_streaming - 1);
+            jnz(non_streaming_loop_start, T_NEAR);
+
+            simple_impl_loop(d, true);
+            jmp(non_streaming_loop_end, T_NEAR);
+            L(non_streaming_loop_start);
+            simple_impl_loop(d, false);
+            L(non_streaming_loop_end);
+        } else {
+            simple_impl_loop(d, false);
+        }
 
         return true;
     }
@@ -1484,6 +1562,10 @@ struct jit_uni_reorder_t : public primitive_t {
             status_t prb_init_status = prb_init(prb, *src_md, *dst_md, attr);
             if (prb_init_status != status::success) return prb_init_status;
 
+            size_t size = data_type_size(prb.itype) + data_type_size(prb.otype);
+            for (int d = 0; d < prb.ndims; ++d)
+                size *= prb.nodes[d].n;
+
             DEBUG({
                 printf("init : ");
                 prb_dump(prb);
@@ -1513,6 +1595,8 @@ struct jit_uni_reorder_t : public primitive_t {
             prb_thread_kernel_balance(prb, ndims_ker_max, nthr);
 
             tr::kernel_t::desc_t ker_desc;
+            ker_desc.large_data
+                    = size > nthr * platform::get_per_core_cache_size(3);
             status_t ker_init_status
                     = tr::kernel_t::desc_init(ker_desc, prb, ndims_ker_max);
             if (ker_init_status != status::success) return ker_init_status;
